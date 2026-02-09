@@ -1,21 +1,11 @@
 /*
-*   ControlViaSerial
-*
-*   Created: Chip Audette, OpenAudio, Apr 2017
-*   Purpose: Shows how system parameters can be controlled via text commands
-*      from the Arduino Serial Monitor.  After programming your Tympan,
-*      go under the Arduino "Tools" menu and select "Serial Monitor".  Then
-*      click in the empty text box at the top, press the letter "h" and hit Enter.
-*      You should see a menu of fun commands.  You can interact with the Tympan
-*      without having to reprogram it!  (note that it will *not* remember any
-*      of your settings if you restart the Tympan)
+*   ControlViaSerial  (SerialDelayV2)
 *
 *   MIT License.  use at your own risk.
 */
 
 //here are the libraries that we need
 #include <Tympan_Library.h>  //include the Tympan Library
-
 #include "SerialManager.h"
 
 //set the sample rate and block size
@@ -24,17 +14,51 @@ const int audio_block_samples = 32;     //do not make bigger than AUDIO_BLOCK_SA
 AudioSettings_F32 audio_settings(sample_rate_Hz, audio_block_samples);
 
 //create audio library objects for handling the audio
-Tympan                  myTympan(TympanRev::F, audio_settings);   //do TympanRev::D or E or F
-AudioInputI2S_F32        i2s_in(audio_settings);     //Digital audio in *from* the Teensy Audio Board ADC.
-AudioEffectGain_F32     gain1;                      //Applies digital gain to audio data.
-AudioEffectDelay_F32    delay1;                     // audio delay (F32)
-AudioOutputI2S_F32      i2s_out(audio_settings);    //Digital audio out *to* the Teensy Audio Board DAC.
+Tympan         myTympan(TympanRev::E, audio_settings);         //do TympanRev::D or E or F
+EarpieceShield earpieceShield(TympanRev::E, AICShieldRev::A);  //earpiece shield
+
+// -------------------------
+// ACTIVE PATH: EARPIECES
+// -------------------------
+AudioInputI2SQuad_F32    i2s_in(audio_settings);     // Quad input required for earpiece channels
+AudioEffectGain_F32      gainL, gainR;               // separate objects, same settings
+AudioEffectDelay_F32     delayL, delayR;             // separate objects, same settings
+AudioOutputI2SQuad_F32   i2s_out(audio_settings);    // Quad output required for earpiece outputs (and/or Tympan outputs)
+
+// Earpiece routing: FRONT mics -> gain -> delay -> earpiece receivers
+AudioConnection_F32  patchCord1(i2s_in,  EarpieceShield::PDM_LEFT_FRONT,   gainL,   0);  // Left front mic -> gainL
+AudioConnection_F32  patchCord2(gainL,   0,                                delayL,  0);  // gainL -> delayL
+AudioConnection_F32  patchCord3(delayL,  0,                                i2s_out, EarpieceShield::OUTPUT_LEFT_EARPIECE);   // -> left earpiece receiver
+
+AudioConnection_F32  patchCord4(i2s_in,  EarpieceShield::PDM_RIGHT_FRONT,  gainR,   0);  // Right front mic -> gainR
+AudioConnection_F32  patchCord5(gainR,   0,                                delayR,  0);  // gainR -> delayR
+AudioConnection_F32  patchCord6(delayR,  0,                                i2s_out, EarpieceShield::OUTPUT_RIGHT_EARPIECE);  // -> right earpiece receiver
+
+// OPTIONAL: also send to Tympan headphone jack outputs (uncomment if you want this too)
+// AudioConnection_F32  patchCord7(delayL,  0, i2s_out, EarpieceShield::OUTPUT_LEFT_TYMPAN);
+// AudioConnection_F32  patchCord8(delayR,  0, i2s_out, EarpieceShield::OUTPUT_RIGHT_TYMPAN);
+
+
+/*
+--------------------------------------------------------------------------------
+PREVIOUS (ONBOARD MIC) VERSION — kept here as an option
+
+//create audio library objects for handling the audio
+Tympan                  myTympan(TympanRev::E, audio_settings);   //do TympanRev::D or E or F
+EarpieceShield          earpieceShield(TympanRev::E, AICShieldRev::A);
+
+AudioInputI2S_F32       i2s_in(audio_settings);     //Stereo I2S input
+AudioEffectGain_F32     gain1;                      //single gain
+AudioEffectDelay_F32    delay1;                     //single delay
+AudioOutputI2S_F32      i2s_out(audio_settings);    //Stereo I2S output
 
 //Make all of the audio connections
-AudioConnection_F32       patchCord1(i2s_in, 0, gain1, 0);        // left input -> gain
-AudioConnection_F32       patchCord2(gain1, 0, delay1, 0);        // gain -> delay
-AudioConnection_F32       patchCord5(delay1, 0, i2s_out, 0);      // delay -> left output
-AudioConnection_F32       patchCord6(delay1, 0, i2s_out, 1);      // delay -> right output (dual-mono)
+AudioConnection_F32     patchCord1(i2s_in, 0, gain1, 0);        // left input -> gain
+AudioConnection_F32     patchCord2(gain1, 0, delay1, 0);        // gain -> delay
+AudioConnection_F32     patchCord5(delay1, 0, i2s_out, 0);      // delay -> left output
+AudioConnection_F32     patchCord6(delay1, 0, i2s_out, 1);      // delay -> right output (dual-mono)
+--------------------------------------------------------------------------------
+*/
 
 
 //control display and serial interaction
@@ -43,33 +67,44 @@ void togglePrintMemoryAndCPU(void) { enable_printCPUandMemory = !enable_printCPU
 SerialManager serialManager;
 
 // define the setup() function, the function that is called once when the device is booting
-const float input_gain_dB = 20.0f; //gain on the microphone
+const float input_gain_dB = 20.0f; // NOTE: used for analog mic preamp path; not used for earpiece digital mics
 float vol_knob_gain_dB = 0.0f;     // set via serial command
 float delay_ms = 10.0f;            // current delay time
 
 void setup() {
   //begin the serial comms (for debugging)
   Serial.begin(115200);  delay(500);
-  Serial.println("ControlViaSerial (SerialDelay): Starting setup()...");
+  Serial.println("ControlViaSerial (SerialDelayV2 - Earpieces): Starting setup()...");
 
   //allocate the audio memory
   AudioMemory_F32(200, audio_settings); // increase/decrease as needed
 
-  //Enable the Tympan to start the audio flowing!
-  myTympan.enable(); // activate AIC
+  //Enable the Tympan + EarpieceShield to start the audio flowing!
+  myTympan.enable();            // activate AIC on main board
+  earpieceShield.enable();      // activate AIC on earpiece shield
 
-  //Choose the desired input
+  // Choose earpieces (digital mics)
+  Serial.println("setup(): Using Tympan Earpieces as Inputs (front mics)");
+  myTympan.enableDigitalMicInputs(true);
+  earpieceShield.enableDigitalMicInputs(true);
+
+  // Set the desired volume levels
+  myTympan.volume_dB(0.0f);         // main board headphone amp (only matters if routing to OUTPUT_*_TYMPAN)
+  earpieceShield.volume_dB(0.0f);   // earpiece receiver amp
+
+  /*
+  // PREVIOUS (ONBOARD MIC) SETUP
+
   myTympan.inputSelect(TYMPAN_INPUT_ON_BOARD_MIC); // use the on board microphones
   // myTympan.inputSelect(TYMPAN_INPUT_JACK_AS_MIC);
   // myTympan.inputSelect(TYMPAN_INPUT_JACK_AS_LINEIN);
 
-  //Set the desired volume levels
-  myTympan.volume_dB(0);                   // headphone amplifier.  -63.6 to +24 dB in 0.5dB steps.
-  myTympan.setInputGain_dB(input_gain_dB); // set input volume, 0-47.5dB in 0.5dB steps
+  myTympan.setInputGain_dB(input_gain_dB); // set input volume, 0-47.5dB in 0.5dB steps.
+  */
 
-  //Set initial algorithm parameters
-  gain1.setGain_dB(vol_knob_gain_dB);
-  delay1.delay(0, delay_ms);               // tap 0, delay in milliseconds
+  // Set initial algorithm parameters (apply to BOTH channels)
+  setVolKnobGain_dB(vol_knob_gain_dB);
+  setDelay_ms(delay_ms);
 
   //End of setup
   Serial.println("Setup complete.");
@@ -99,16 +134,18 @@ void printGainSettings(void) {
   Serial.println();
 }
 
-// set digital gain (dB)
+// set digital gain (dB) — apply to BOTH gain objects
 void setVolKnobGain_dB(float gain_dB) {
-  gain1.setGain_dB(gain_dB);
   vol_knob_gain_dB = gain_dB;
+  gainL.setGain_dB(gain_dB);
+  gainR.setGain_dB(gain_dB);
   printGainSettings();
 }
 
-// set delay (ms)
+// set delay (ms) — apply to BOTH delay objects
 void setDelay_ms(float ms) {
   delay_ms = max(0.0f, min(1000.0f, ms));
-  delay1.delay(0, delay_ms);
+  delayL.delay(0, delay_ms);
+  delayR.delay(0, delay_ms);
   Serial.print("Delay = "); Serial.print(delay_ms); Serial.println(" ms");
 }
