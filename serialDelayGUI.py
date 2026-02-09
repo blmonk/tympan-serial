@@ -7,7 +7,7 @@ from serialDelay import SerialDelayClient  # imports the class you added
 
 # --- GUI settings (adjust if you want different range/step) ---
 DELAY_MIN_MS = 0.0
-DELAY_MAX_MS = 1000.0
+DELAY_MAX_MS = 100.0
 DELAY_STEP_MS = 0.1
 SEND_DEBOUNCE_MS = 120  # avoid spamming Teensy while dragging slider
 

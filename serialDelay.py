@@ -33,29 +33,65 @@ def print_ports():
         print(f"{p.device:20}  {desc}  {manu}  {hwid}")
 
 
+# def auto_pick_port():
+#     """
+#     Return the COM port for the Teensy whose USB serial number is 11551630.
+#     Works even if the COM number changes.
+#     """
+#     TARGET_SERIAL = "11551630"
+# 
+#     ports = list(list_ports.comports())
+#     if not ports:
+#         return None
+# 
+#     # 1) Preferred: direct serial_number match (most reliable when present)
+#     for p in ports:
+#         if getattr(p, "serial_number", None) == TARGET_SERIAL:
+#             return p.device  # e.g. "COM4"
+# 
+#     # 2) Fallback: parse from HWID string (often contains "SER=...")
+#     for p in ports:
+#         hwid = (getattr(p, "hwid", "") or "")
+#         if f"SER={TARGET_SERIAL}" in hwid:
+#             return p.device
+# 
+#     return None
+
 def auto_pick_port():
     """
-    Return the COM port for the Teensy whose USB serial number is 11551630.
-    Works even if the COM number changes.
+    Best-effort port picker. Prefers ports that look like Teensy/USB serial devices.
     """
-    TARGET_SERIAL = "11551630"
-
-    ports = list(list_ports.comports())
+    ports = iter_ports()
     if not ports:
         return None
 
-    # 1) Preferred: direct serial_number match (most reliable when present)
-    for p in ports:
-        if getattr(p, "serial_number", None) == TARGET_SERIAL:
-            return p.device  # e.g. "COM4"
+    def score(p):
+        text = " ".join([
+            p.device or "",
+            p.description or "",
+            getattr(p, "manufacturer", "") or "",
+            p.hwid or "",
+        ]).lower()
 
-    # 2) Fallback: parse from HWID string (often contains "SER=...")
-    for p in ports:
-        hwid = (getattr(p, "hwid", "") or "")
-        if f"SER={TARGET_SERIAL}" in hwid:
-            return p.device
+        s = 0
+        if "teensy" in text:
+            s += 50
+        if "pjrc" in text:
+            s += 30
+        if "usb serial" in text:
+            s += 10
 
-    return None
+        if "ttyacm" in text:
+            s += 8
+        if "usbmodem" in text or "usbserial" in text:
+            s += 8
+
+        if "bluetooth" in text:
+            s -= 50
+        return s
+
+    ports_sorted = sorted(ports, key=score, reverse=True)
+    return ports_sorted[0].device
 
 
 class SerialDelayClient:
