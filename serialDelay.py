@@ -35,39 +35,27 @@ def print_ports():
 
 def auto_pick_port():
     """
-    Best-effort port picker. Prefers ports that look like Teensy/USB serial devices.
+    Return the COM port for the Teensy whose USB serial number is 11551630.
+    Works even if the COM number changes.
     """
-    ports = iter_ports()
+    TARGET_SERIAL = "11551630"
+
+    ports = list(list_ports.comports())
     if not ports:
         return None
 
-    def score(p):
-        text = " ".join([
-            p.device or "",
-            p.description or "",
-            getattr(p, "manufacturer", "") or "",
-            p.hwid or "",
-        ]).lower()
+    # 1) Preferred: direct serial_number match (most reliable when present)
+    for p in ports:
+        if getattr(p, "serial_number", None) == TARGET_SERIAL:
+            return p.device  # e.g. "COM4"
 
-        s = 0
-        if "teensy" in text:
-            s += 50
-        if "pjrc" in text:
-            s += 30
-        if "usb serial" in text:
-            s += 10
+    # 2) Fallback: parse from HWID string (often contains "SER=...")
+    for p in ports:
+        hwid = (getattr(p, "hwid", "") or "")
+        if f"SER={TARGET_SERIAL}" in hwid:
+            return p.device
 
-        if "ttyacm" in text:
-            s += 8
-        if "usbmodem" in text or "usbserial" in text:
-            s += 8
-
-        if "bluetooth" in text:
-            s -= 50
-        return s
-
-    ports_sorted = sorted(ports, key=score, reverse=True)
-    return ports_sorted[0].device
+    return None
 
 
 class SerialDelayClient:
