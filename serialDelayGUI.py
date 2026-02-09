@@ -2,10 +2,10 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from queue import Empty
 
-from serialDelay import SerialDelayClient  # imports the class you added
+from serialDelay import SerialDelayClient
 
 
-# --- GUI settings (adjust if you want different range/step) ---
+# --- GUI settings ---
 DELAY_MIN_MS = 0.0
 DELAY_MAX_MS = 100.0
 DELAY_STEP_MS = 0.1
@@ -114,7 +114,6 @@ class SerialDelayGUI(tk.Tk):
         s = self.port_var.get().strip()
         if not s:
             return None
-        # value is like "COM5 — Teensy ..." or "/dev/ttyACM0 — ..."
         return s.split(" — ", 1)[0].strip()
 
     def toggle_connect(self):

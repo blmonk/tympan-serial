@@ -125,7 +125,7 @@ class SerialDelayClient:
             except Exception:
                 pass
 
-        # Optional flush (WARNING: can drop Teensy startup banner)
+        # Optional flush
         if flush_on_open:
             try:
                 self.ser.reset_input_buffer()
